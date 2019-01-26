@@ -1,0 +1,269 @@
+#include <LPC214X.H>
+#include "uart0.h"
+#include "lcd.h"
+#include "adc0.h"
+#include <string.h>	
+#define  BULB1    (1 << 16)
+#define  BULB2    (1 << 17)
+#define  MOTOR    (1 << 18)
+#define  FAN      (1 << 19)
+/************ FUNCTION DECLARATIONS **********/
+void gsmint(void);
+unsigned int TEM,LDR,HUM,SMK,val1,val0,val2,val3;
+/********** vARIABLE DECLARATIONS ***********/
+unsigned char k,loc,num[20];
+unsigned char b[20],c[100],f1,f2,flag,n,i;
+unsigned char b1_f,b2_f,f_f,m_f;
+
+void convert1(unsigned int t,unsigned char k)
+{
+unsigned int d1,d2,d3;
+d1=t%10;
+t=t/10;
+d2=t%10;
+t=t/10;
+d3=t%10;
+if(k==0)
+{
+lcddata(d3+0x30);
+lcddata(d2+0x30);
+lcddata(d1+0x30);
+}
+if(k==1)
+{
+serial_char0(d3+0x30);
+serial_char0(d2+0x30);
+serial_char0(d1+0x30);
+}
+}		
+void gprsint()				
+{
+lcdclear();
+lcdcmd(0x80);
+lcd_str("GPRS CONNECTING..."); 
+serial0("AT+CGATT=1");
+serial_char0(0x0d);
+delay(1000);
+serial0("AT+CGDCONT=1,\"IP\",\"airtelgprs.com\"");   // command to convert to text mode
+serial_char0(0x0d);
+delay(1000);
+serial0("AT+CIPSTART=\"TCP\",\"124.123.41.147\",\"9998\""); //2014 command to receive b
+serial_char0(0x0d);
+delay(2000);
+lcdcmd(0x80);
+lcd_str("GPRS CONNECTED   ");
+delay(1000);
+delay(1000);
+} 
+void send1()
+{
+lcdcmd(0x01);
+lcdcmd(0x80);
+lcd_str("DATA SENDING");
+delay(2000);
+serial0("AT+CIPSEND"); // command to receive b
+serial_char0(0x0d);
+delay(500);
+
+serial0("TEMPARATURE"); 
+serial_char0(',');
+convert1(TEM,1);
+serial_char0('$');
+delay(500);	
+if(TEM>0x30)
+{
+serial0("TEMPARATURE"); 
+serial_char0(',');
+serial0("HIGH");
+serial_char0('$');
+delay(500);	
+}
+
+serial0("SMOKE"); 
+serial_char0(',');
+convert1(SMK,1);
+serial_char0('$'); 
+delay(500);
+
+if(SMK>0x30)
+{
+serial0("SMOKE"); 
+serial_char0(',');
+serial0("HIGH");
+serial_char0('$');
+delay(500);	
+}
+serial0("LDR"); 
+serial_char0(',');
+convert1(LDR,1);
+serial_char0('$');
+delay(500);	
+if(LDR<0x0F)
+{
+serial0("LOW"); 
+serial_char0(',');
+serial0("LIGHT");
+serial_char0('$');
+delay(500);	
+}
+
+serial0("HUMIDITY"); 
+serial_char0(',');
+convert1(HUM,1);
+serial_char0('$'); 
+delay(500);
+if(HUM>0x30)
+{
+serial0("HUMIDITY"); 
+serial_char0(',');
+serial0("HIGH");
+serial_char0('$');
+delay(500);	
+}		
+serial_char0(0x0d);	
+serial_char0(0x1A);
+delay(10000);
+lcdclear();
+lcdcmd(0x80);
+lcd_str("DATA SENT");
+delay(1000);
+}
+
+/************* MAIN FUNCTION **************/
+int main( void )								 // main programming 
+{
+lcdint();							 // lcd initilisation..
+lcdclear();
+disp_loc(0x80,"WELCOME TO THE ");
+disp_loc(0xc0,"   PROJECT  ");
+delay(1000);			
+lcdclear();
+
+serialint0(); 		
+delay(1000);
+gsmint();
+delay(1000);
+gprsint();
+lcdcmd(0x01);
+disp_loc(0x80,"GPRS CONNECTED");
+delay(1000);
+lcdclear();
+disp_loc(0x80,"WELCOME TO THE ");
+disp_loc(0xc0,"   PROJECT  ");
+delay(1000);
+while(1)
+{
+lcdclear();
+disp_loc(0x80,"HUM");
+AD0CR=0X002E0402;  // channel 1 of ADC0 i.e. P0.28
+AD0CR|=0x01000000;
+HUM=ADC_DAT0();
+lcdcmd(0xC0);
+convert1(HUM,0);
+
+disp_loc(0x85,"TEM");
+AD0CR=0X002E0404;	// channel 3 of ADC0 i.e. P0.30
+AD0CR|=0x01000000;
+TEM=ADC_DAT1();
+lcdcmd(0xC5);
+convert1(TEM,0);
+
+disp_loc(0x89,"LDR");
+AD0CR=0X002E0408;	// channel 3 of ADC0 i.e. P0.30
+AD0CR|=0x01000000;
+LDR=ADC_DAT2();
+lcdcmd(0xC9);
+convert1(LDR,0);
+
+disp_loc(0x8D,"GAS:");
+AD0CR=0X002E0410;	// channel 2 of ADC0 i.e. P0.29
+AD0CR|=0x01000000;
+SMK=ADC_DAT3();
+lcdcmd(0xCD);
+convert1(SMK,0);
+
+delay(1000);
+send1(); 
+delay(10000); 
+
+lcdcmd(0x01);
+disp_loc(0x80,"WAITING......");
+delay(10000);
+delay(10000);
+delay(10000);
+delay(10000);
+delay(10000);  
+if(flag==1)
+{
+lcdcmd(0x01);
+disp_loc(0x80,"CMD RECEIVED ");
+delay(10000);
+if(!strcmp(b,"BULB1 ON"))
+{
+IOSET0=BULB1;
+b1_f=1;
+}
+else if(!strcmp(b,"BULB1 OFF"))
+{
+IOCLR0=BULB1;
+b1_f=0;
+}
+else if(!strcmp(b,"BULB2 ON"))
+{
+IOSET0=BULB2;
+b2_f=1;
+}
+else if(!strcmp(b,"BULB2 OFF"))
+{
+IOCLR0=BULB2;
+b2_f=0;
+} 	
+else if(!strcmp(b,"FAN ON"))
+{
+IOSET0=FAN;
+f_f=1;
+}
+else if(!strcmp(b,"FAN OFF"))
+{
+IOCLR0=FAN;
+f_f=0;
+}
+else if(!strcmp(b,"MOTOR ON"))
+{
+IOSET0=MOTOR;
+m_f=1;
+}
+else if(!strcmp(b,"MOTOR OFF"))
+{
+IOCLR0=MOTOR;
+m_f=0;
+}				
+memcpy(b,'\0',sizeof(b));
+i=0;
+flag=0;
+f2=0;
+lcdcmd(0x01);
+disp_loc(0x80,"  WELCOME  TO  ");
+disp_loc(0xc0,"  THE PROJECT  ");
+delay(10000);	
+}
+}
+}
+/********* GSM INITLISATION  ****************/
+void gsmint()					// GSM initilisation.
+{
+lcdclear();
+lcdcmd(0x80);
+lcd_str("GSM CONNECTING...");  // GSM connecting ...
+serial0("AT");
+serial_char0(0x0d);
+serial0("AT+CMGF=1");				   // command to convert to text mode
+serial_char0(0x0d);
+serial0("AT+CNMI=1,2,0,0,0");			 // command to receive b
+serial_char0(0x0d);
+delay(10);
+  
+lcdclear();
+lcdcmd(0x80);
+lcd_str("GSM CONNECTED...");	
+} 
